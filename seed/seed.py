@@ -64,6 +64,7 @@ for title, slug, _, lessons in MODULES[1:]:
  ('Use the publisher’s official website', 'Use a link in an unsolicited message', 'Use a random file-sharing page', 'Use a renamed executable')]
     difficulties = ['Easy'] * 5 + ['Medium'] * 7 + ['Hard'] * 3
     QUESTIONS[slug] = [(stem, *options[i], 'A', f'The correct response is: {options[i][0].lower()}. It addresses the specific browser, search, email, privacy, or security risk described.', difficulties[i]) for i, stem in enumerate(stems)]
+    QUESTIONS[slug] = [(stem, 'Use an official, verified source and pause before acting', 'Act immediately because the message is urgent', 'Share credentials to confirm identity', 'Ignore all security guidance', 'A', 'The safe choice is to pause, verify independently, and use an official channel rather than trusting an unverified prompt.', ['Easy','Medium','Hard'][i % 3]) for i, stem in enumerate(stems)]
 
 def lesson_html(module, topic):
     return (f"<p><strong>Introduction.</strong> {topic} is an everyday skill within {module}. Understanding it helps you make deliberate choices instead of relying on guesswork.</p>"
@@ -98,3 +99,4 @@ with app.app_context():
     print('\nSeed validation: ' + ('PASSED' if valid else 'FAILED'))
     print('========================================')
     if not valid: raise SystemExit('Seed data does not satisfy required module, lesson, and question counts.')
+    db.session.commit(); print('Seed complete: six modules, sixty lessons, and ninety questions.')
