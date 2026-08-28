@@ -1,81 +1,173 @@
-from datetime import datetime
-from flask import Blueprint, abort, flash, redirect, render_template, url_for
+from secrets import token_urlsafe
+from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
 from flask_wtf import FlaskForm
 from wtforms import IntegerField, SelectField, TextAreaField, SubmitField
-from wtforms.validators import DataRequired, NumberRange, Optional, Length
+from wtforms.validators import DataRequired, Length, NumberRange, Optional
 from ..extensions import db
 from ..models import Certificate, Feedback, Lesson, Module, Progress, Question, QuizAnswer, QuizAttempt, SurveyResponse
 from ..utils import completion, eligible
-bp=Blueprint('student',__name__,url_prefix='/learn')
-class FeedbackForm(FlaskForm): rating=IntegerField('Rating (1–5)',validators=[DataRequired(),NumberRange(1,5)]);message=TextAreaField('Feedback',validators=[DataRequired(),Length(max=3000)]);submit=SubmitField('Send feedback')
+
+bp = Blueprint('student', __name__, url_prefix='/learn')
+PASS_MARK = 70
+
+class FeedbackForm(FlaskForm):
+    rating = IntegerField('Rating (1–5)', validators=[DataRequired(), NumberRange(1, 5)])
+    message = TextAreaField('Feedback', validators=[DataRequired(), Length(max=3000)])
+    submit = SubmitField('Send feedback')
+
 class SurveyForm(FlaskForm):
- overall_experience=IntegerField('Overall experience (1–5)',validators=[DataRequired(),NumberRange(1,5)]);ease_of_understanding=IntegerField('Ease of understanding (1–5)',validators=[DataRequired(),NumberRange(1,5)]);useful_module_id=SelectField('Most useful module',coerce=int,validators=[DataRequired()]);confidence_improvement=IntegerField('Confidence improvement (1–5)',validators=[DataRequired(),NumberRange(1,5)]);difficulty=SelectField('Difficulty',choices=[('Too easy','Too easy'),('Appropriate','Appropriate'),('Challenging','Challenging')]);suggestions=TextAreaField('Suggestions',validators=[Optional(),Length(max=3000)]);submit=SubmitField('Submit survey')
+    overall_experience = IntegerField('Overall experience (1–5)', validators=[DataRequired(), NumberRange(1, 5)])
+    ease_of_understanding = IntegerField('Ease of understanding (1–5)', validators=[DataRequired(), NumberRange(1, 5)])
+    useful_module_id = SelectField('Most useful module', coerce=int, validators=[DataRequired()])
+    confidence_improvement = IntegerField('Confidence improvement (1–5)', validators=[DataRequired(), NumberRange(1, 5)])
+    difficulty = SelectField('Difficulty', choices=[('Too easy', 'Too easy'), ('Appropriate', 'Appropriate'), ('Challenging', 'Challenging')])
+    suggestions = TextAreaField('Suggestions', validators=[Optional(), Length(max=3000)])
+    submit = SubmitField('Submit survey')
+
 def student_only():
- if current_user.is_admin: abort(403)
+    if current_user.is_admin:
+        abort(403)
+
+def module_progress(module, completed_ids):
+    lessons = [lesson for lesson in module.lessons if lesson.published]
+    done = sum(lesson.id in completed_ids for lesson in lessons)
+    return {'done': done, 'total': len(lessons), 'percent': round(done / len(lessons) * 100) if lessons else 0}
+
 @bp.route('/dashboard')
 @login_required
 def dashboard():
- student_only(); done,total,pct=completion(current_user); attempts=QuizAttempt.query.filter_by(user_id=current_user.id).order_by(QuizAttempt.submitted_at.desc()).all(); completed_lessons={p.lesson_id for p in current_user.progress_records}; next_lesson=Lesson.query.filter(~Lesson.id.in_(completed_lessons)).join(Module).filter(Module.published.is_(True)).order_by(Module.display_order,Lesson.display_order).first() if completed_lessons else Lesson.query.join(Module).filter(Module.published.is_(True)).order_by(Module.display_order,Lesson.display_order).first()
- return render_template('student/dashboard.html',done=done,total=total,pct=pct,attempts=attempts,next_lesson=next_lesson,certificate=eligible(current_user))
+    student_only()
+    done, total, percent = completion(current_user)
+    attempts = QuizAttempt.query.filter_by(user_id=current_user.id).order_by(QuizAttempt.submitted_at.desc()).all()
+    completed_ids = {record.lesson_id for record in current_user.progress_records}
+    modules = Module.query.filter_by(published=True).order_by(Module.display_order).all()
+    next_lesson = next((lesson for module in modules for lesson in module.lessons if lesson.published and lesson.id not in completed_ids), None)
+    module_data = [(module, module_progress(module, completed_ids)) for module in modules]
+    latest_score = attempts[0].percentage if attempts else None
+    best_score = max((attempt.percentage for attempt in attempts), default=None)
+    return render_template('student/dashboard.html', done=done, total=total, pct=percent, attempts=attempts, next_lesson=next_lesson, certificate=eligible(current_user), module_data=module_data, latest_score=latest_score, best_score=best_score)
+
 @bp.route('/modules')
 @login_required
-def modules(): student_only(); return render_template('student/modules.html',modules=Module.query.filter_by(published=True).order_by(Module.display_order).all(),completed={p.lesson_id for p in current_user.progress_records})
+def modules():
+    student_only()
+    completed = {record.lesson_id for record in current_user.progress_records}
+    catalog = [(module, module_progress(module, completed)) for module in Module.query.filter_by(published=True).order_by(Module.display_order)]
+    return render_template('student/modules.html', catalog=catalog)
+
 @bp.route('/modules/<slug>')
 @login_required
 def module(slug):
- student_only(); module=Module.query.filter_by(slug=slug,published=True).first_or_404(); completed={p.lesson_id for p in current_user.progress_records}; return render_template('student/module.html',module=module,completed=completed)
+    student_only()
+    current_module = Module.query.filter_by(slug=slug, published=True).first_or_404()
+    completed = {record.lesson_id for record in current_user.progress_records}
+    return render_template('student/module.html', module=current_module, completed=completed, progress=module_progress(current_module, completed))
+
 @bp.route('/lessons/<int:lesson_id>')
 @login_required
 def lesson(lesson_id):
- student_only(); lesson=Lesson.query.get_or_404(lesson_id); module=lesson.module
- if not module.published: abort(404)
- ordered=module.lessons; i=ordered.index(lesson); return render_template('student/lesson.html',lesson=lesson,module=module,previous=ordered[i-1] if i else None,next_lesson=ordered[i+1] if i+1<len(ordered) else None,completed=Progress.query.filter_by(user_id=current_user.id,lesson_id=lesson.id).first())
+    student_only()
+    current_lesson = Lesson.query.get_or_404(lesson_id)
+    if not current_lesson.published or not current_lesson.module.published:
+        abort(404)
+    lessons = [item for item in current_lesson.module.lessons if item.published]
+    position = lessons.index(current_lesson)
+    completed = Progress.query.filter_by(user_id=current_user.id, lesson_id=current_lesson.id).first()
+    completed_ids = {record.lesson_id for record in current_user.progress_records}
+    return render_template('student/lesson.html', lesson=current_lesson, module=current_lesson.module, previous=lessons[position - 1] if position else None, next_lesson=lessons[position + 1] if position + 1 < len(lessons) else None, completed=completed, progress=module_progress(current_lesson.module, completed_ids))
+
 @bp.post('/lessons/<int:lesson_id>/complete')
 @login_required
 def complete_lesson(lesson_id):
- student_only(); lesson=Lesson.query.get_or_404(lesson_id)
- if not Progress.query.filter_by(user_id=current_user.id,lesson_id=lesson.id).first(): db.session.add(Progress(user_id=current_user.id,lesson_id=lesson.id)); db.session.commit(); flash('Lesson marked complete. Your progress is updated.','success')
- return redirect(url_for('student.lesson',lesson_id=lesson.id))
-@bp.route('/modules/<slug>/quiz',methods=['GET','POST'])
+    student_only()
+    current_lesson = Lesson.query.get_or_404(lesson_id)
+    if not current_lesson.published or not current_lesson.module.published:
+        abort(404)
+    if not Progress.query.filter_by(user_id=current_user.id, lesson_id=current_lesson.id).first():
+        db.session.add(Progress(user_id=current_user.id, lesson_id=current_lesson.id))
+        db.session.commit()
+        flash('Lesson completed successfully. Your learning progress has been updated.', 'success')
+    else:
+        flash('This lesson was already marked as complete.', 'info')
+    return redirect(url_for('student.lesson', lesson_id=current_lesson.id))
+
+@bp.route('/modules/<slug>/quiz', methods=['GET', 'POST'])
 @login_required
 def quiz(slug):
- student_only(); module=Module.query.filter_by(slug=slug,published=True).first_or_404(); questions=Question.query.filter_by(module_id=module.id,active=True).order_by(Question.id).all()
- if not questions: flash('This module has no active quiz questions yet.','warning'); return redirect(url_for('student.module',slug=slug))
- if __import__('flask').request.method=='POST':
-  correct=0; attempt=QuizAttempt(user_id=current_user.id,module_id=module.id,score=0,total_questions=len(questions),percentage=0,passed=False); db.session.add(attempt); db.session.flush()
-  for q in questions:
-   answer=__import__('flask').request.form.get(f'q_{q.id}'); ok=answer==q.correct_option; correct+=ok; db.session.add(QuizAnswer(attempt_id=attempt.id,question_id=q.id,selected_option=answer,is_correct=ok))
-  attempt.score=correct; attempt.percentage=round(correct/len(questions)*100,2); attempt.passed=attempt.percentage>=70; db.session.commit(); return redirect(url_for('student.result',attempt_id=attempt.id))
- return render_template('student/quiz.html',module=module,questions=questions)
+    student_only()
+    current_module = Module.query.filter_by(slug=slug, published=True).first_or_404()
+    questions = Question.query.filter_by(module_id=current_module.id, active=True).order_by(Question.id).all()
+    if not questions:
+        flash('This module does not have an active quiz yet.', 'warning')
+        return redirect(url_for('student.module', slug=slug))
+    if request.method == 'POST':
+        if request.form.get('submission_token') != session.pop(f'quiz-token-{current_module.id}', None):
+            flash('This quiz submission has already been processed or has expired. Start a new attempt.', 'warning')
+            return redirect(url_for('student.quiz', slug=current_module.slug))
+        attempt = QuizAttempt(user_id=current_user.id, module_id=current_module.id, score=0, total_questions=len(questions), percentage=0, passed=False)
+        db.session.add(attempt); db.session.flush()
+        correct = 0
+        for question in questions:
+            selected = request.form.get(f'q_{question.id}')
+            is_correct = selected == question.correct_option
+            correct += is_correct
+            db.session.add(QuizAnswer(attempt_id=attempt.id, question_id=question.id, selected_option=selected, is_correct=is_correct))
+        attempt.score = correct; attempt.percentage = round(correct / len(questions) * 100, 2); attempt.passed = attempt.percentage >= PASS_MARK
+        db.session.commit()
+        return redirect(url_for('student.result', attempt_id=attempt.id))
+    token = token_urlsafe(24)
+    session[f'quiz-token-{current_module.id}'] = token
+    return render_template('student/quiz.html', module=current_module, questions=questions, token=token)
+
 @bp.route('/results/<int:attempt_id>')
 @login_required
 def result(attempt_id):
- student_only(); attempt=QuizAttempt.query.get_or_404(attempt_id)
- if attempt.user_id!=current_user.id: abort(403)
- return render_template('student/result.html',attempt=attempt)
+    student_only()
+    attempt = QuizAttempt.query.get_or_404(attempt_id)
+    if attempt.user_id != current_user.id:
+        abort(403)
+    message = 'Excellent work — you demonstrated solid understanding.' if attempt.passed else 'Review the explanations, revisit the lesson, then try again when ready.'
+    return render_template('student/result.html', attempt=attempt, incorrect=attempt.total_questions-attempt.score, message=message)
+
 @bp.route('/history')
 @login_required
-def history(): student_only(); return render_template('student/history.html',attempts=QuizAttempt.query.filter_by(user_id=current_user.id).order_by(QuizAttempt.submitted_at.desc()).all())
+def history():
+    student_only()
+    module_id = request.args.get('module', type=int)
+    query = QuizAttempt.query.filter_by(user_id=current_user.id)
+    if module_id: query = query.filter_by(module_id=module_id)
+    return render_template('student/history.html', attempts=query.order_by(QuizAttempt.submitted_at.desc()).all(), modules=Module.query.filter_by(published=True).all(), selected_module=module_id)
+
 @bp.route('/certificate')
 @login_required
 def certificate():
- student_only()
- if not eligible(current_user): flash('Complete every lesson and pass each module quiz to unlock your certificate.','warning'); return redirect(url_for('student.dashboard'))
- cert=Certificate.query.filter_by(user_id=current_user.id).first()
- if not cert: cert=Certificate(user_id=current_user.id);db.session.add(cert);db.session.commit()
- return render_template('student/certificate.html',cert=cert)
-@bp.route('/feedback',methods=['GET','POST'])
+    student_only()
+    if not eligible(current_user):
+        flash('Complete every published lesson and pass each module quiz to unlock your certificate.', 'warning')
+        return redirect(url_for('student.dashboard'))
+    cert = Certificate.query.filter_by(user_id=current_user.id).first()
+    if not cert:
+        cert = Certificate(user_id=current_user.id); db.session.add(cert); db.session.commit()
+    return render_template('student/certificate.html', cert=cert)
+
+@bp.route('/feedback', methods=['GET', 'POST'])
 @login_required
 def feedback():
- student_only();form=FeedbackForm()
- if form.validate_on_submit(): db.session.add(Feedback(user_id=current_user.id,rating=form.rating.data,message=form.message.data.strip()));db.session.commit();flash('Feedback received. Thank you.','success');return redirect(url_for('student.feedback'))
- return render_template('student/form.html',form=form,title='Share feedback',intro='Help us improve the learning experience.')
-@bp.route('/survey',methods=['GET','POST'])
+    student_only(); form = FeedbackForm()
+    if form.validate_on_submit():
+        db.session.add(Feedback(user_id=current_user.id, rating=form.rating.data, message=form.message.data.strip())); db.session.commit()
+        flash('Feedback received. Thank you for helping improve NetWise.', 'success'); return redirect(url_for('student.feedback'))
+    return render_template('student/form.html', form=form, title='Share feedback', intro='Tell us what worked well and what could be clearer.')
+
+@bp.route('/survey', methods=['GET', 'POST'])
 @login_required
 def survey():
- student_only()
- if SurveyResponse.query.filter_by(user_id=current_user.id).first(): flash('You have already completed the learning survey.','info');return redirect(url_for('student.dashboard'))
- form=SurveyForm();form.useful_module_id.choices=[(m.id,m.title) for m in Module.query.filter_by(published=True).all()]
- if form.validate_on_submit(): db.session.add(SurveyResponse(user_id=current_user.id,overall_experience=form.overall_experience.data,ease_of_understanding=form.ease_of_understanding.data,useful_module_id=form.useful_module_id.data,confidence_improvement=form.confidence_improvement.data,difficulty=form.difficulty.data,suggestions=form.suggestions.data));db.session.commit();flash('Survey submitted. Thank you.','success');return redirect(url_for('student.dashboard'))
- return render_template('student/form.html',form=form,title='Learning survey',intro='Tell us how the course worked for you.')
+    student_only()
+    if SurveyResponse.query.filter_by(user_id=current_user.id).first():
+        flash('You have already completed the learning survey.', 'info'); return redirect(url_for('student.dashboard'))
+    form = SurveyForm(); form.useful_module_id.choices = [(module.id, module.title) for module in Module.query.filter_by(published=True).all()]
+    if form.validate_on_submit():
+        db.session.add(SurveyResponse(user_id=current_user.id, overall_experience=form.overall_experience.data, ease_of_understanding=form.ease_of_understanding.data, useful_module_id=form.useful_module_id.data, confidence_improvement=form.confidence_improvement.data, difficulty=form.difficulty.data, suggestions=form.suggestions.data)); db.session.commit()
+        flash('Survey submitted. Thank you for your thoughtful response.', 'success'); return redirect(url_for('student.dashboard'))
+    return render_template('student/form.html', form=form, title='Learning survey', intro='Your answers help us assess and improve this course.')

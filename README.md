@@ -26,3 +26,9 @@ Capture deployment screenshots here for the academic report.
 
 ## Future enhancements
 Email notifications, granular admin audit logs, content image uploads with validation, and server-generated PDF certificates.
+
+## Curriculum and analytics
+The seed contains six authored curriculum areas, sixty lessons, and fifteen quiz questions per module. Student and administrator screens calculate progress, quiz outcomes, completion and feedback metrics from database records. The admin dashboard uses Chart.js for module completion, quiz performance, and feedback-rating views.
+
+## Production deployment
+Set `FLASK_ENV=production`, a long random `SECRET_KEY`, a MySQL `DATABASE_URL`, and serve the WSGI application `run:app` behind HTTPS. Do not run seeded development credentials in production.

@@ -3,6 +3,7 @@ from flask_login import login_required
 from flask_wtf import FlaskForm
 from wtforms import BooleanField, IntegerField, SelectField, StringField, TextAreaField, SubmitField
 from wtforms.validators import DataRequired, Length, NumberRange, URL
+from sqlalchemy import func
 from ..extensions import db
 from ..models import ContactMessage, Feedback, Lesson, Module, Question, QuizAttempt, SurveyResponse, User
 from ..utils import admin_required
@@ -18,8 +19,18 @@ def choices(form):form.module_id.choices=[(m.id,m.title) for m in Module.query.o
 @login_required
 @admin_required
 def dashboard():
- stats={'students':User.query.filter_by(role='STUDENT').count(),'modules':Module.query.count(),'questions':Question.query.count(),'attempts':QuizAttempt.query.count(),'feedback':Feedback.query.count(),'unread':ContactMessage.query.filter_by(status='unread').count()}; attempts=QuizAttempt.query.all();stats['average']=round(sum(a.percentage for a in attempts)/len(attempts),1) if attempts else 0
- return render_template('admin/dashboard.html',stats=stats,modules=Module.query.order_by(Module.display_order).all())
+ attempts = QuizAttempt.query.all()
+ stats = {'students': User.query.filter_by(role='STUDENT').count(), 'modules': Module.query.count(), 'lessons': Lesson.query.count(), 'questions': Question.query.count(), 'attempts': len(attempts), 'feedback': Feedback.query.count(), 'unread': ContactMessage.query.filter_by(status='unread').count()}
+ stats['average'] = round(sum(a.percentage for a in attempts) / len(attempts), 1) if attempts else 0
+ total_lessons = Lesson.query.filter_by(published=True).count()
+ completed = __import__('app.models', fromlist=['Progress']).Progress.query.count()
+ stats['completion_rate'] = round(completed / (total_lessons * stats['students']) * 100, 1) if total_lessons and stats['students'] else 0
+ module_labels = []; module_completion = []; module_scores = []
+ for module in Module.query.order_by(Module.display_order):
+  module_labels.append(module.title); possible = len(module.lessons) * stats['students']; module_completion.append(round(__import__('app.models', fromlist=['Progress']).Progress.query.join(Lesson).filter(Lesson.module_id == module.id).count() / possible * 100, 1) if possible else 0)
+  scores = [a.percentage for a in attempts if a.module_id == module.id]; module_scores.append(round(sum(scores) / len(scores), 1) if scores else 0)
+ ratings = [Feedback.query.filter_by(rating=value).count() for value in range(1, 6)]
+ return render_template('admin/dashboard.html', stats=stats, chart_data={'labels': module_labels, 'completion': module_completion, 'scores': module_scores, 'ratings': ratings})
 @bp.route('/students')
 @login_required
 @admin_required
@@ -56,10 +67,20 @@ def module_delete(module_id): db.session.delete(Module.query.get_or_404(module_i
 @bp.route('/modules/<int:module_id>/lessons/new',methods=['GET','POST'])
 @login_required
 @admin_required
-def lesson_new(module_id):
- module=Module.query.get_or_404(module_id);form=LessonForm()
- if form.validate_on_submit(): obj=Lesson(module_id=module.id);form.populate_obj(obj);db.session.add(obj);db.session.commit();flash('Lesson created.','success');return redirect(url_for('admin.modules'))
- return render_template('admin/entity_form.html',form=form,title=f'Add lesson — {module.title}')
+def lesson_new(module_id): return lesson_edit(module_id, None)
+@bp.route('/modules/<int:module_id>/lessons/<int:lesson_id>/edit', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def lesson_edit(module_id, lesson_id):
+ module=Module.query.get_or_404(module_id); obj=Lesson.query.filter_by(id=lesson_id, module_id=module.id).first_or_404() if lesson_id else Lesson(module_id=module.id); form=LessonForm(obj=obj)
+ if form.validate_on_submit():
+  form.populate_obj(obj); db.session.add(obj); db.session.commit(); flash('Lesson saved.', 'success'); return redirect(url_for('admin.modules'))
+ return render_template('admin/entity_form.html', form=form, title=('Edit lesson — ' if lesson_id else 'Add lesson — ') + module.title)
+@bp.post('/lessons/<int:lesson_id>/delete')
+@login_required
+@admin_required
+def lesson_delete(lesson_id):
+ db.session.delete(Lesson.query.get_or_404(lesson_id)); db.session.commit(); flash('Lesson deleted.', 'success'); return redirect(url_for('admin.modules'))
 @bp.route('/questions')
 @login_required
 @admin_required

@@ -29,7 +29,7 @@ class Module(TimestampMixin, db.Model):
 
 class Lesson(TimestampMixin, db.Model):
     __tablename__ = 'lessons'; id = db.Column(db.Integer, primary_key=True); module_id = db.Column(db.Integer, db.ForeignKey('modules.id', ondelete='CASCADE'), nullable=False, index=True)
-    title = db.Column(db.String(180), nullable=False); content = db.Column(db.Text, nullable=False); key_points = db.Column(db.Text); safety_tip = db.Column(db.Text); display_order = db.Column(db.Integer, default=0, nullable=False)
+    title = db.Column(db.String(180), nullable=False); slug = db.Column(db.String(200), unique=True, index=True); content = db.Column(db.Text, nullable=False); key_points = db.Column(db.Text); safety_tip = db.Column(db.Text); knowledge_question = db.Column(db.String(500)); knowledge_answer = db.Column(db.String(500)); knowledge_explanation = db.Column(db.Text); video_url = db.Column(db.String(500)); estimated_minutes = db.Column(db.Integer, default=8, nullable=False); published = db.Column(db.Boolean, default=True, nullable=False); display_order = db.Column(db.Integer, default=0, nullable=False)
     module = db.relationship('Module', back_populates='lessons')
 
 class Progress(db.Model):
