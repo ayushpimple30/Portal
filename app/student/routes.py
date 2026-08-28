@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+from random import sample
 from secrets import token_urlsafe
 from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
@@ -10,6 +12,7 @@ from ..utils import completion, eligible
 
 bp = Blueprint('student', __name__, url_prefix='/learn')
 PASS_MARK = 70
+QUIZ_SECONDS = 15 * 60
 
 class FeedbackForm(FlaskForm):
     rating = IntegerField('Rating (1–5)', validators=[DataRequired(), NumberRange(1, 5)])
@@ -97,6 +100,32 @@ def complete_lesson(lesson_id):
 def quiz(slug):
     student_only()
     current_module = Module.query.filter_by(slug=slug, published=True).first_or_404()
+    available = Question.query.filter_by(module_id=current_module.id, active=True).all()
+    if not available:
+        flash('This module does not have an active quiz yet.', 'warning')
+        return redirect(url_for('student.module', slug=slug))
+    key = f'quiz-{current_module.id}'
+    if request.method == 'POST':
+        state = session.pop(key, None)
+        if not state or request.form.get('submission_token') != state['token']:
+            flash('This quiz submission has already been processed or has expired. Start a new attempt.', 'warning')
+            return redirect(url_for('student.quiz', slug=current_module.slug))
+        elapsed = min(QUIZ_SECONDS, max(0, int(datetime.now(timezone.utc).timestamp() - state['started_at'])))
+        selected_questions = Question.query.filter(Question.id.in_(state['question_ids'])).all()
+        by_id = {question.id: question for question in selected_questions}
+        ordered = [by_id[item_id] for item_id in state['question_ids'] if item_id in by_id]
+        attempt = QuizAttempt(user_id=current_user.id, module_id=current_module.id, score=0, total_questions=len(ordered), percentage=0, passed=False, started_at=datetime.fromtimestamp(state['started_at']), duration_seconds=elapsed)
+        db.session.add(attempt); db.session.flush(); correct = 0
+        for question in ordered:
+            selected = request.form.get(f'q_{question.id}')
+            is_correct = selected == question.correct_option; correct += is_correct
+            db.session.add(QuizAnswer(attempt_id=attempt.id, question_id=question.id, selected_option=selected, is_correct=is_correct))
+        attempt.score = correct; attempt.percentage = round(correct / len(ordered) * 100, 2); attempt.passed = attempt.percentage >= PASS_MARK
+        db.session.commit(); return redirect(url_for('student.result', attempt_id=attempt.id))
+    questions = sample(available, len(available))
+    token = token_urlsafe(24); started_at = int(datetime.now(timezone.utc).timestamp())
+    session[key] = {'token': token, 'started_at': started_at, 'question_ids': [question.id for question in questions]}
+    return render_template('student/quiz.html', module=current_module, questions=questions, token=token, quiz_seconds=QUIZ_SECONDS)
     questions = Question.query.filter_by(module_id=current_module.id, active=True).order_by(Question.id).all()
     if not questions:
         flash('This module does not have an active quiz yet.', 'warning')
@@ -171,3 +200,16 @@ def survey():
         db.session.add(SurveyResponse(user_id=current_user.id, overall_experience=form.overall_experience.data, ease_of_understanding=form.ease_of_understanding.data, useful_module_id=form.useful_module_id.data, confidence_improvement=form.confidence_improvement.data, difficulty=form.difficulty.data, suggestions=form.suggestions.data)); db.session.commit()
         flash('Survey submitted. Thank you for your thoughtful response.', 'success'); return redirect(url_for('student.dashboard'))
     return render_template('student/form.html', form=form, title='Learning survey', intro='Your answers help us assess and improve this course.')
+
+class ProfileForm(FlaskForm):
+    full_name = TextAreaField('Full name', validators=[DataRequired(), Length(max=120)])
+    submit = SubmitField('Save profile')
+
+@bp.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    student_only(); form = ProfileForm(obj=current_user)
+    if form.validate_on_submit():
+        current_user.full_name = form.full_name.data.strip(); db.session.commit(); flash('Your profile was updated.', 'success'); return redirect(url_for('student.profile'))
+    done, total, percent = completion(current_user); attempts = QuizAttempt.query.filter_by(user_id=current_user.id).all()
+    return render_template('student/profile.html', form=form, done=done, total=total, percent=percent, attempts=attempts, average=round(sum(item.percentage for item in attempts)/len(attempts), 1) if attempts else None, best=max((item.percentage for item in attempts), default=None), certificate=Certificate.query.filter_by(user_id=current_user.id).first())

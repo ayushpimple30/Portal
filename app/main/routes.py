@@ -3,6 +3,7 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, TextAreaField, SubmitField
 from wtforms.validators import DataRequired, Email, Length
 from ..extensions import db
+from ..models import Certificate, ContactMessage, Module
 from ..models import ContactMessage, Module
 bp=Blueprint('main',__name__)
 class ContactForm(FlaskForm):
@@ -19,3 +20,8 @@ def contact():
 def robots(): return Response('User-agent: *\nAllow: /\n',mimetype='text/plain')
 @bp.route('/sitemap.xml')
 def sitemap(): return Response(render_template('main/sitemap.xml',modules=Module.query.filter_by(published=True).all()),mimetype='application/xml')
+
+@bp.route('/verify/<certificate_code>')
+def verify_certificate(certificate_code):
+ cert = Certificate.query.filter_by(certificate_code=certificate_code.upper()).first()
+ return render_template('main/verify_certificate.html', cert=cert, code=certificate_code.upper()), (200 if cert else 404)

@@ -123,3 +123,17 @@ def contact_status(message_id,status):
 @login_required
 @admin_required
 def contact_delete(message_id):db.session.delete(ContactMessage.query.get_or_404(message_id));db.session.commit();flash('Contact message deleted.','success');return redirect(url_for('admin.contacts'))
+
+@bp.route('/students/<int:user_id>')
+@login_required
+@admin_required
+def student_detail(user_id):
+    student = User.query.filter_by(id=user_id, role='STUDENT').first_or_404()
+    completed = {record.lesson_id for record in student.progress_records}
+    modules_data = []
+    for module in Module.query.order_by(Module.display_order):
+        lesson_ids = [lesson.id for lesson in module.lessons if lesson.published]
+        done = sum(item in completed for item in lesson_ids)
+        modules_data.append((module, done, len(lesson_ids), round(done / len(lesson_ids) * 100) if lesson_ids else 0))
+    attempts = QuizAttempt.query.filter_by(user_id=student.id).order_by(QuizAttempt.submitted_at.desc()).all()
+    return render_template('admin/student_detail.html', student=student, modules_data=modules_data, attempts=attempts, average=round(sum(item.percentage for item in attempts) / len(attempts), 1) if attempts else None, best=max((item.percentage for item in attempts), default=None), certificate=__import__('app.models', fromlist=['Certificate']).Certificate.query.filter_by(user_id=student.id).first())
