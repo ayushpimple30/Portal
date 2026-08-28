@@ -46,6 +46,24 @@ for title, slug, _, lessons in MODULES[1:]:
       'passwords-privacy':['What makes a strong passphrase?','Why is password reuse risky?','What does two-factor authentication add?','Who may receive an OTP?','What is a password manager for?','What should privacy settings control?','What is social engineering?','What is safe account recovery?','Which personal detail should be shared cautiously?','What should you do after a breach notice?','Why use unique passwords?','What is a recovery code?','What is the safest password-storage practice?','What is a suspicious support request?','When should privacy settings be reviewed?'],
       'cybersecurity-safety':['What is malware?','What is safest after a suspicious link click?','Why install software updates?','What should you verify on a payment site?','What is a common scam pressure tactic?','What is safest on public Wi-Fi?','Where should software be downloaded?','What should be reported?','What can ransomware do?','What should you do with unknown USB media?','How can a fake website be spotted?','What does antivirus software help with?','What should be done after a possible account compromise?','Why back up important files?','What is the best response to a pop-up claiming infection?']
     }[slug]
+    options = [
+ ('Save the page as a bookmark', 'Close the browser permanently', 'Copy the address into an email', 'Turn off the Internet connection'),
+ ('Hide activity from other people using this device', 'Hide activity from websites and providers', 'Remove malware automatically', 'Make every site anonymous'),
+ ('Confirm the exact domain before entering data', 'Use the first suggested result', 'Trust a familiar logo alone', 'Ignore a certificate warning'),
+ ('Check its source and file type first', 'Open it while it is downloading', 'Rename it to make it safe', 'Share it before scanning'),
+ ('Remember preferences for a website', 'Repair a damaged screen', 'Encrypt every message', 'Remove browser history'),
+ ('Use the tab close button', 'Clear all saved passwords', 'Disconnect Wi-Fi', 'Delete the website'),
+ ('Pages visited by this browser profile', 'Every page on the Internet', 'Only saved bookmarks', 'Only downloaded files'),
+ ('Install updates from the browser vendor', 'Disable security warnings', 'Reuse one browser password', 'Keep unknown extensions enabled'),
+ ('Compare pages side by side', 'Prevent a site from tracking you', 'Delete cookies automatically', 'Block all downloads'),
+ ('Group saved links by purpose', 'Store email attachments', 'Hide browsing from a network', 'Update installed software'),
+ ('Remove extensions you do not recognise', 'Install every suggested extension', 'Grant all extensions permissions', 'Ignore extension reviews'),
+ ('Close it and avoid its download link', 'Call the number in the pop-up', 'Enter payment details to remove it', 'Give it remote access'),
+ ('Remove stored copies of page files', 'Delete an online account', 'Block website updates', 'Erase bookmarks'),
+ ('Allow automatic security updates', 'Ignore release notes forever', 'Install updates from pop-up ads', 'Turn off update checks'),
+ ('Use the publisher’s official website', 'Use a link in an unsolicited message', 'Use a random file-sharing page', 'Use a renamed executable')]
+    difficulties = ['Easy'] * 5 + ['Medium'] * 7 + ['Hard'] * 3
+    QUESTIONS[slug] = [(stem, *options[i], 'A', f'The correct response is: {options[i][0].lower()}. It addresses the specific browser, search, email, privacy, or security risk described.', difficulties[i]) for i, stem in enumerate(stems)]
     QUESTIONS[slug] = [(stem, 'Use an official, verified source and pause before acting', 'Act immediately because the message is urgent', 'Share credentials to confirm identity', 'Ignore all security guidance', 'A', 'The safe choice is to pause, verify independently, and use an official channel rather than trusting an unverified prompt.', ['Easy','Medium','Hard'][i % 3]) for i, stem in enumerate(stems)]
 
 def lesson_html(module, topic):
@@ -68,4 +86,17 @@ with app.app_context():
                 db.session.add(Lesson(module_id=module.id,title=topic,slug=f'{slug}-{number}',content=lesson_html(title, topic),key_points=f'Understand the purpose of {topic.lower()}; check before acting; use trusted sources.',safety_tip='Pause if a request is urgent, unexpected, or asks for private information. Verify it through an official channel.',knowledge_question=f'What is one safe practice when using {topic.lower()}?',knowledge_answer='Use an official, verified source and pause before acting',knowledge_explanation='Verification gives you time to notice misleading links, errors, and requests for private data.',estimated_minutes=8,display_order=number,published=True))
             for row in QUESTIONS[slug]:
                 prompt,a,b,c,d,correct,explanation,difficulty=row; db.session.add(Question(module_id=module.id,prompt=prompt,option_a=a,option_b=b,option_c=c,option_d=d,correct_option=correct,explanation=explanation,difficulty=difficulty,active=True))
+    db.session.commit()
+    expected = {title: 15 for title, _, _, _ in MODULES}
+    module_count = Module.query.count(); lesson_count = Lesson.query.count(); question_count = Question.query.count()
+    actual = {module.title: Question.query.filter_by(module_id=module.id).count() for module in Module.query.order_by(Module.display_order)}
+    lesson_actual = {module.title: Lesson.query.filter_by(module_id=module.id).count() for module in Module.query.order_by(Module.display_order)}
+    valid = module_count == 6 and lesson_count == 60 and question_count == 90 and actual == expected and all(count == 10 for count in lesson_actual.values())
+    print('\n========================================')
+    print('DATABASE SEED VALIDATION\n========================================')
+    print(f'\nModules:   {module_count:>3} / 6\nLessons:   {lesson_count:>3} / 60\nQuestions: {question_count:>3} / 90\n')
+    for title, _, _, _ in MODULES: print(f'{title:<38} {actual.get(title, 0):>2} questions · {lesson_actual.get(title, 0):>2} lessons')
+    print('\nSeed validation: ' + ('PASSED' if valid else 'FAILED'))
+    print('========================================')
+    if not valid: raise SystemExit('Seed data does not satisfy required module, lesson, and question counts.')
     db.session.commit(); print('Seed complete: six modules, sixty lessons, and ninety questions.')
