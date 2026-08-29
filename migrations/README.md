@@ -1,0 +1,1 @@
+Flask-Migrate manages database revisions. Initialize this directory in a deployment with `flask --app run.py db init` if Alembic metadata files are not already installed, then generate and apply `flask --app run.py db migrate -m "initial schema"` and `flask --app run.py db upgrade`. The SQLAlchemy models are the schema source of truth.

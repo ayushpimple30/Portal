@@ -1,0 +1,3 @@
+-- The authoritative, portable schema is maintained by Flask-SQLAlchemy/Alembic models.
+-- Create a MySQL database first: CREATE DATABASE teaching_internet_basics CHARACTER SET utf8mb4;
+-- Then run: flask --app run.py db upgrade && python seed/seed.py
