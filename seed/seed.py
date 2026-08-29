@@ -63,6 +63,19 @@ for _, slug, _, _ in MODULES[1:]:
     for index, stem in enumerate(stems):
         choices = list(QUESTION_OPTIONS[slug][index]); correct = corrects[index]; answer = choices.pop(0); choices.insert('ABCD'.index(correct), answer)
         QUESTIONS[slug].append((stem, *choices, correct, f'{answer} is the best answer because it directly addresses the situation described.', difficulties[index]))
+
+LESSON_CONTENT = {}
+for _title, _slug, _, _topics in MODULES:
+    for _topic in _topics:
+        _terms = _topic.lower()
+        LESSON_CONTENT[_topic] = {
+            "content": f"<p><strong>Introduction.</strong> This lesson explains {_terms} in the context of {_title}.</p><p><strong>How it works.</strong> Learn what {_terms} means, where it appears in everyday online tasks, and how to make an informed decision when using it.</p><p><strong>Real-world example.</strong> A learner encounters {_terms} while completing a familiar online task and checks the relevant information before continuing.</p><p><strong>Practical example.</strong> Identify {_terms} in a trusted service, read the available options, and apply the lesson’s guidance deliberately.</p>",
+            "key_points": f"Purpose of {_terms}; practical use; important terms; safe decision-making.",
+            "safety_tip": f"Treat unexpected requests connected to {_terms} carefully and verify them through an official channel.",
+            "knowledge_question": f"Which statement best describes {_terms}?",
+            "knowledge_answer": f"It should be understood and used deliberately in the context of {_title}.",
+            "knowledge_explanation": f"The lesson explains the purpose and safe use of {_terms}."
+        }
 # Author unique questions for the other modules from their lesson outcomes. They remain distinct from the Internet Basics bank.
 for title, slug, _, lessons in MODULES[1:]:
     stems = {
@@ -109,6 +122,7 @@ with app.app_context():
         if not module:
             module=Module(title=title,slug=slug,description=description,content=f'<p>{description}</p>',estimated_minutes=80,display_order=order,published=True); db.session.add(module); db.session.flush()
             for number, topic in enumerate(lessons, 1):
+                db.session.add(Lesson(module_id=module.id,title=topic,slug=f'{slug}-{number}',content=LESSON_CONTENT[topic]['content'],key_points=LESSON_CONTENT[topic]['key_points'],safety_tip=LESSON_CONTENT[topic]['safety_tip'],knowledge_question=LESSON_CONTENT[topic]['knowledge_question'],knowledge_answer=LESSON_CONTENT[topic]['knowledge_answer'],knowledge_explanation=LESSON_CONTENT[topic]['knowledge_explanation'],estimated_minutes=8,display_order=number,published=True))
                 db.session.add(Lesson(module_id=module.id,title=topic,slug=f'{slug}-{number}',content=lesson_html(title, topic),key_points=f'Understand the purpose of {topic.lower()}; check before acting; use trusted sources.',safety_tip='Pause if a request is urgent, unexpected, or asks for private information. Verify it through an official channel.',knowledge_question=f'What is one safe practice when using {topic.lower()}?',knowledge_answer='Use an official, verified source and pause before acting',knowledge_explanation='Verification gives you time to notice misleading links, errors, and requests for private data.',estimated_minutes=8,display_order=number,published=True))
             for row in QUESTIONS[slug]:
                 prompt,a,b,c,d,correct,explanation,difficulty=row; db.session.add(Question(module_id=module.id,prompt=prompt,option_a=a,option_b=b,option_c=c,option_d=d,correct_option=correct,explanation=explanation,difficulty=difficulty,active=True))
