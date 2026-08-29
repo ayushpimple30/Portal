@@ -4,6 +4,7 @@ from wtforms import StringField, TextAreaField, SubmitField
 from wtforms.validators import DataRequired, Email, Length
 from ..extensions import db
 from ..models import Certificate, ContactMessage, Module
+from ..models import ContactMessage, Module
 bp=Blueprint('main',__name__)
 class ContactForm(FlaskForm):
  name=StringField('Name',validators=[DataRequired(),Length(max=120)]);email=StringField('Email',validators=[DataRequired(),Email()]);subject=StringField('Subject',validators=[DataRequired(),Length(max=180)]);message=TextAreaField('Message',validators=[DataRequired(),Length(max=5000)]);submit=SubmitField('Send message')

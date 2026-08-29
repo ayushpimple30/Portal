@@ -126,6 +126,28 @@ def quiz(slug):
     token = token_urlsafe(24); started_at = int(datetime.now(timezone.utc).timestamp())
     session[key] = {'token': token, 'started_at': started_at, 'question_ids': [question.id for question in questions]}
     return render_template('student/quiz.html', module=current_module, questions=questions, token=token, quiz_seconds=QUIZ_SECONDS)
+    questions = Question.query.filter_by(module_id=current_module.id, active=True).order_by(Question.id).all()
+    if not questions:
+        flash('This module does not have an active quiz yet.', 'warning')
+        return redirect(url_for('student.module', slug=slug))
+    if request.method == 'POST':
+        if request.form.get('submission_token') != session.pop(f'quiz-token-{current_module.id}', None):
+            flash('This quiz submission has already been processed or has expired. Start a new attempt.', 'warning')
+            return redirect(url_for('student.quiz', slug=current_module.slug))
+        attempt = QuizAttempt(user_id=current_user.id, module_id=current_module.id, score=0, total_questions=len(questions), percentage=0, passed=False)
+        db.session.add(attempt); db.session.flush()
+        correct = 0
+        for question in questions:
+            selected = request.form.get(f'q_{question.id}')
+            is_correct = selected == question.correct_option
+            correct += is_correct
+            db.session.add(QuizAnswer(attempt_id=attempt.id, question_id=question.id, selected_option=selected, is_correct=is_correct))
+        attempt.score = correct; attempt.percentage = round(correct / len(questions) * 100, 2); attempt.passed = attempt.percentage >= PASS_MARK
+        db.session.commit()
+        return redirect(url_for('student.result', attempt_id=attempt.id))
+    token = token_urlsafe(24)
+    session[f'quiz-token-{current_module.id}'] = token
+    return render_template('student/quiz.html', module=current_module, questions=questions, token=token)
 
 @bp.route('/results/<int:attempt_id>')
 @login_required
